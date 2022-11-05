@@ -106,6 +106,9 @@ enum msm_usb_phy_type {
 };
 
 #define IDEV_CHG_MAX	1500
+#define IDEV_CHG_DCP	1300
+#define IDEV_CHG_PROP	1200
+#define IDEV_CHG_TA	1100
 #define IDEV_CHG_MIN	500
 #define IUNIT		100
 
@@ -288,6 +291,7 @@ enum usb_id_state {
  */
 struct msm_otg_platform_data {
 	int *phy_init_seq;
+	int *phy_host_init_seq;
 	int (*vbus_power)(bool on);
 	unsigned power_budget;
 	enum usb_mode_type mode;
@@ -316,6 +320,7 @@ struct msm_otg_platform_data {
 	bool enable_ahb2ahb_bypass;
 	bool disable_retention_with_vdd_min;
 	int usb_id_gpio;
+	int usb_id_gpio_hw;
 	int hub_reset_gpio;
 	int switch_sel_gpio;
 	bool phy_dvdd_always_on;
@@ -607,6 +612,7 @@ struct msm_otg {
 	int pm_qos_latency;
 	struct pm_qos_request pm_qos_req_dma;
 	struct delayed_work perf_vote_work;
+	int falsesdp_retry_count;
 };
 
 struct ci13xxx_platform_data {

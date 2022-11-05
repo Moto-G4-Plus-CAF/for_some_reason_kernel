@@ -37,6 +37,7 @@
 #include <linux/qpnp/qpnp-adc.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/pm_qos.h>
+#include <soc/qcom/socinfo.h>
 
 #include <soc/qcom/subsystem_restart.h>
 #include <soc/qcom/subsystem_notif.h>
@@ -179,13 +180,12 @@ static DEFINE_SPINLOCK(reg_spinlock);
 #define WCNSS_MAX_BUILD_VER_LEN		256
 #define WCNSS_MAX_CMD_LEN		(128)
 #define WCNSS_MIN_CMD_LEN		(3)
-#define WCNSS_MIN_SERIAL_LEN		(6)
 
 /* control messages from userspace */
 #define WCNSS_USR_CTRL_MSG_START  0x00000000
-#define WCNSS_USR_SERIAL_NUM      (WCNSS_USR_CTRL_MSG_START + 1)
 #define WCNSS_USR_HAS_CAL_DATA    (WCNSS_USR_CTRL_MSG_START + 2)
 #define WCNSS_USR_WLAN_MAC_ADDR   (WCNSS_USR_CTRL_MSG_START + 3)
+#define WCNSS_USR_WLAN_NV_NAME    (WCNSS_USR_CTRL_MSG_START + 4)
 
 #define MAC_ADDRESS_STR "%02x:%02x:%02x:%02x:%02x:%02x"
 
@@ -426,6 +426,7 @@ static struct {
 	int pc_disabled;
 	struct delayed_work wcnss_pm_qos_del_req;
 	struct mutex pm_qos_mutex;
+	char wcnss_nv_name[WLAN_NV_NAME_SIZE];
 } *penv = NULL;
 
 static ssize_t wcnss_wlan_macaddr_store(struct device *dev,
@@ -471,34 +472,6 @@ static ssize_t wcnss_wlan_macaddr_show(struct device *dev,
 
 static DEVICE_ATTR(wcnss_mac_addr, S_IRUSR | S_IWUSR,
 	wcnss_wlan_macaddr_show, wcnss_wlan_macaddr_store);
-
-static ssize_t wcnss_serial_number_show(struct device *dev,
-				struct device_attribute *attr, char *buf)
-{
-	if (!penv)
-		return -ENODEV;
-
-	return scnprintf(buf, PAGE_SIZE, "%08X\n", penv->serial_number);
-}
-
-static ssize_t wcnss_serial_number_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count)
-{
-	unsigned int value;
-
-	if (!penv)
-		return -ENODEV;
-
-	if (sscanf(buf, "%08X", &value) != 1)
-		return -EINVAL;
-
-	penv->serial_number = value;
-	return count;
-}
-
-static DEVICE_ATTR(serial_number, S_IRUSR | S_IWUSR,
-	wcnss_serial_number_show, wcnss_serial_number_store);
-
 
 static ssize_t wcnss_thermal_mitigation_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
@@ -1148,13 +1121,9 @@ static int wcnss_create_sysfs(struct device *dev)
 	if (!dev)
 		return -ENODEV;
 
-	ret = device_create_file(dev, &dev_attr_serial_number);
-	if (ret)
-		return ret;
-
 	ret = device_create_file(dev, &dev_attr_thermal_mitigation);
 	if (ret)
-		goto remove_serial;
+		return ret;
 
 	ret = device_create_file(dev, &dev_attr_wcnss_version);
 	if (ret)
@@ -1170,8 +1139,6 @@ remove_version:
 	device_remove_file(dev, &dev_attr_wcnss_version);
 remove_thermal:
 	device_remove_file(dev, &dev_attr_thermal_mitigation);
-remove_serial:
-	device_remove_file(dev, &dev_attr_serial_number);
 
 	return ret;
 }
@@ -1179,7 +1146,6 @@ remove_serial:
 static void wcnss_remove_sysfs(struct device *dev)
 {
 	if (dev) {
-		device_remove_file(dev, &dev_attr_serial_number);
 		device_remove_file(dev, &dev_attr_thermal_mitigation);
 		device_remove_file(dev, &dev_attr_wcnss_version);
 		device_remove_file(dev, &dev_attr_wcnss_mac_addr);
@@ -1628,8 +1594,13 @@ EXPORT_SYMBOL(wcnss_unregister_thermal_mitigation);
 
 unsigned int wcnss_get_serial_number(void)
 {
-	if (penv)
+	if (penv) {
+		penv->serial_number = socinfo_get_serial_number();
+		pr_info("%s: Device serial number: %u\n",
+			__func__, penv->serial_number);
 		return penv->serial_number;
+	}
+
 	return 0;
 }
 EXPORT_SYMBOL(wcnss_get_serial_number);
@@ -1880,7 +1851,7 @@ static void wcnss_notify_vbat(enum qpnp_tm_state state, void *ctx)
 			ADC_TM_LOW_THR_ENABLE;
 		penv->vbat_monitor_params.low_thr = WCNSS_VBATT_THRESHOLD -
 		WCNSS_VBATT_GUARD;
-		penv->vbat_monitor_params.high_thr = 0;
+		penv->vbat_monitor_params.high_thr = WCNSS_VBATT_THRESHOLD*2;
 		pr_debug("wcnss: high voltage notification triggered\n");
 	} else {
 		pr_debug("wcnss: unknown voltage notification state: %d\n",
@@ -2606,21 +2577,27 @@ static int wcnss_ctrl_open(struct inode *inode, struct file *file)
 	return rc;
 }
 
+int wcnss_get_wlan_nv_name(char *nv_name)
+{
+	if (!penv)
+		return -ENODEV;
+	if (penv->wcnss_nv_name[0] != 0) {
+		memcpy(nv_name, penv->wcnss_nv_name, WLAN_NV_NAME_SIZE);
+		pr_debug("%s: Get NV name: %s" "\n", __func__,
+			penv->wcnss_nv_name);
+		return 0;
+	}
+	pr_err("%s: No NV name\n", __func__);
+	return 1;
+}
+EXPORT_SYMBOL(wcnss_get_wlan_nv_name);
 
 void process_usr_ctrl_cmd(u8 *buf, size_t len)
 {
 	u16 cmd = buf[0] << 8 | buf[1];
+	s8 fname_length;
 
 	switch (cmd) {
-
-	case WCNSS_USR_SERIAL_NUM:
-		if (WCNSS_MIN_SERIAL_LEN > len) {
-			pr_err("%s: Invalid serial number\n", __func__);
-			return;
-		}
-		penv->serial_number = buf[2] << 24 | buf[3] << 16
-			| buf[4] << 8 | buf[5];
-		break;
 
 	case WCNSS_USR_HAS_CAL_DATA:
 		if (1 < buf[2])
@@ -2637,6 +2614,20 @@ void process_usr_ctrl_cmd(u8 *buf, size_t len)
 			penv->wlan_nv_macAddr[0], penv->wlan_nv_macAddr[1],
 			penv->wlan_nv_macAddr[2], penv->wlan_nv_macAddr[3],
 			penv->wlan_nv_macAddr[4], penv->wlan_nv_macAddr[5]);
+		break;
+	case WCNSS_USR_WLAN_NV_NAME:
+		fname_length = (buf[2] < WLAN_NV_NAME_SIZE) ?
+				buf[2]:WLAN_NV_NAME_SIZE-1;
+
+		if (fname_length < 0)
+			pr_debug("%s: Invalid filename length for filename %d\n",
+				 __func__, fname_length);
+		pr_debug("%s: fname length was %d",
+			 __func__, fname_length);
+		memcpy(penv->wcnss_nv_name, &buf[3], fname_length);
+		penv->wcnss_nv_name[WLAN_NV_NAME_SIZE-1] = 0;
+		pr_err("%s: user nv set to %s, fname length was %d",
+			__func__, penv->wcnss_nv_name, fname_length);
 		break;
 
 	default:
@@ -3474,6 +3465,7 @@ wcnss_wlan_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 	penv->pdev = pdev;
+	penv->wcnss_nv_name[0] = 0;
 
 	penv->user_cal_data =
 		devm_kzalloc(&pdev->dev, MAX_CALIBRATED_DATA_SIZE, GFP_KERNEL);

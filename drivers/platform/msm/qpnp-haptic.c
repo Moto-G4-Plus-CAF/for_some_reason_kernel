@@ -322,6 +322,7 @@ struct qpnp_hap {
 	u8 lra_res_cal_period;
 	u8 sc_duration;
 	u8 ext_pwm_dtest_line;
+	int boot_up_vib;
 	bool state;
 	bool use_play_irq;
 	bool use_sc_irq;
@@ -1291,6 +1292,44 @@ static ssize_t qpnp_hap_ramp_test_data_show(struct device *dev,
 
 }
 
+/* sysfs show for vmax_mv_strong update */
+static ssize_t qpnp_hap_vmax_mv_strong_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct timed_output_dev *timed_dev = dev_get_drvdata(dev);
+	struct qpnp_hap *hap = container_of(timed_dev, struct qpnp_hap,
+					 timed_dev);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", hap->vmax_mv);
+}
+
+/* sysfs store for vmax_mv_strong */
+static ssize_t qpnp_hap_vmax_mv_strong_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct timed_output_dev *timed_dev = dev_get_drvdata(dev);
+	struct qpnp_hap *hap = container_of(timed_dev, struct qpnp_hap,
+					 timed_dev);
+	u32 val;
+	ssize_t ret;
+
+	ret = kstrtou32(buf, 10, &val);
+	if (ret)
+		return ret;
+
+	if ((val < QPNP_HAP_VMAX_MIN_MV) || (val > QPNP_HAP_VMAX_MAX_MV))
+		return -EINVAL;
+
+	mutex_lock(&hap->wf_lock);
+	hap->vmax_mv = val;
+	ret = qpnp_hap_vmax_config(hap);
+	if (ret)
+		pr_err("%s: error setting vmax_mv\n", __func__);
+	mutex_unlock(&hap->wf_lock);
+
+	return count;
+}
+
 /* sysfs attributes */
 static struct device_attribute qpnp_hap_attrs[] = {
 	__ATTR(wf_s0, (S_IRUGO | S_IWUSR | S_IWGRP),
@@ -1338,6 +1377,9 @@ static struct device_attribute qpnp_hap_attrs[] = {
 	__ATTR(min_max_test, (S_IRUGO | S_IWUSR | S_IWGRP),
 			qpnp_hap_min_max_test_data_show,
 			qpnp_hap_min_max_test_data_store),
+	__ATTR(vmax_mv_strong, (S_IRUGO | S_IWUSR | S_IWGRP),
+			qpnp_hap_vmax_mv_strong_show,
+			qpnp_hap_vmax_mv_strong_store),
 };
 
 static void calculate_lra_code(struct qpnp_hap *hap)
@@ -1583,6 +1625,11 @@ static void qpnp_hap_td_enable(struct timed_output_dev *dev, int value)
 	}
 	mutex_unlock(&hap->lock);
 	schedule_work(&hap->work);
+}
+
+void set_vibrate(int value)
+{
+	qpnp_hap_td_enable(&ghap->timed_dev, value);
 }
 
 /* play pwm bytes */
@@ -2123,6 +2170,13 @@ static int qpnp_hap_parse_dt(struct qpnp_hap *hap)
 		return rc;
 	}
 
+	rc = of_property_read_u32(spmi->dev.of_node,
+			"mmi,vib-boot-up-vib-ms", &temp);
+	if (!rc)
+		hap->boot_up_vib = temp;
+	else
+		hap->boot_up_vib = 0;
+
 	hap->ilim_ma = QPNP_HAP_ILIM_MIN_MV;
 	rc = of_property_read_u32(spmi->dev.of_node,
 			"qcom,ilim-ma", &temp);
@@ -2305,6 +2359,9 @@ static int qpnp_haptic_probe(struct spmi_device *spmi)
 		}
 		hap->vcc_pon = vcc_pon;
 	}
+
+	if (hap->boot_up_vib)
+		qpnp_hap_td_enable(&hap->timed_dev, hap->boot_up_vib);
 
 	ghap = hap;
 

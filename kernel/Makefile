@@ -67,6 +67,7 @@ obj-$(CONFIG_KPROBES) += kprobes.o
 obj-$(CONFIG_KGDB) += debug/
 obj-$(CONFIG_DETECT_HUNG_TASK) += hung_task.o
 obj-$(CONFIG_LOCKUP_DETECTOR) += watchdog.o
+obj-$(CONFIG_SOFTLOCKUP_WATCHDOG_TEST) += watchdogtest.o
 obj-$(CONFIG_SECCOMP) += seccomp.o
 obj-$(CONFIG_RELAY) += relay.o
 obj-$(CONFIG_SYSCTL) += utsname_sysctl.o
@@ -139,10 +140,6 @@ X509_CERTIFICATES-y := $(wildcard *.x509) $(wildcard $(srctree)/*.x509)
 X509_CERTIFICATES-$(CONFIG_MODULE_SIG) += signing_key.x509
 X509_CERTIFICATES := $(sort $(foreach CERT,$(X509_CERTIFICATES-y), \
 				$(or $(realpath $(CERT)),$(CERT))))
-
-ifeq ($(X509_CERTIFICATES),)
-$(warning *** No X.509 certificates found ***)
-endif
 
 ifneq ($(wildcard $(obj)/.x509.list),)
 ifneq ($(shell cat $(obj)/.x509.list),$(X509_CERTIFICATES))

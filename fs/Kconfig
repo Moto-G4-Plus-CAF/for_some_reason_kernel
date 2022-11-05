@@ -13,6 +13,7 @@ if BLOCK
 source "fs/ext2/Kconfig"
 source "fs/ext3/Kconfig"
 source "fs/ext4/Kconfig"
+source "fs/f2fs/Kconfig"
 
 config FS_XIP
 # execute in place
@@ -92,6 +93,7 @@ if BLOCK
 menu "DOS/FAT/NT Filesystems"
 
 source "fs/fat/Kconfig"
+source "fs/exfat/Kconfig"
 source "fs/ntfs/Kconfig"
 
 endmenu
@@ -189,6 +191,7 @@ source "fs/adfs/Kconfig"
 source "fs/affs/Kconfig"
 source "fs/ecryptfs/Kconfig"
 source "fs/sdcardfs/Kconfig"
+source "fs/esdfs/Kconfig"
 source "fs/hfs/Kconfig"
 source "fs/hfsplus/Kconfig"
 source "fs/befs/Kconfig"
@@ -215,7 +218,6 @@ source "fs/pstore/Kconfig"
 source "fs/sysv/Kconfig"
 source "fs/ufs/Kconfig"
 source "fs/exofs/Kconfig"
-source "fs/f2fs/Kconfig"
 source "fs/efivarfs/Kconfig"
 
 endif # MISC_FILESYSTEMS
